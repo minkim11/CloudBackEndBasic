@@ -12,3 +12,10 @@ spring:
     properties:
       hibernate:
         format_sql: true
+
+  cloud:
+    aws:
+      region:
+        static: ap-northeast-2
+      parameterstore:
+        enabled: false
