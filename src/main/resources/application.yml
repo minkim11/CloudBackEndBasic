@@ -1,6 +1,15 @@
 spring:
   application:
     name: cloud-basic
+  cloud:
+    aws:
+      region:
+        static: ap-northeast-2
+      s3:
+        bucket: cloud-basic-profile-097466312661-ap-northeast-2-an
+  servlet:
+    multipart:
+      max-file-size: 10MB
 
 logging:
   level:

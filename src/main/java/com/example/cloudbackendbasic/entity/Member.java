@@ -18,6 +18,7 @@ public class Member {
     private String name;
     private Integer age;
     private String mbti;
+    private String profileKey;
 
 
     public Member(String name, Integer age, String mbti) {
@@ -26,4 +27,7 @@ public class Member {
         this.mbti = mbti;
     }
 
+    public void uploadProfile(String profileKey) {
+        this.profileKey = profileKey;
+    }
 }
