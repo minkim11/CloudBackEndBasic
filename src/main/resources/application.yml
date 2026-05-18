@@ -1,8 +1,6 @@
 spring:
   application:
     name: cloud-basic
-  profiles:
-    active: local
 
 logging:
   level:
