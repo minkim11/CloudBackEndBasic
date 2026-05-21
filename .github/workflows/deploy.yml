@@ -1,16 +1,14 @@
-name: CI/CD Pipeline (AWS ECR & OIDC)
+name: CI/CD Pipeline (Docker Hub & Single EC2)
 
 on:
   push:
     branches: [ "main" ]
 
 permissions:
-  id-token: write
   contents: read
 
 env:
-  AWS_REGION: ${{ secrets.AWS_REGION }}
-  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+  IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}
 
 jobs:
   # ==================== CI Step ====================
@@ -30,7 +28,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           java-version: '17'
-          distribution: 'temurin'
+          distribution: 'corretto'
 
       - name: Gradle Caching
         uses: actions/cache@v4
@@ -45,11 +43,11 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
-      # ✅ [추가] 빌드 전 테스트 먼저 실행 — 실패 시 이후 단계 전체 중단
-      - name: Run tests (pre-build health check)
+      # 1단계: 테스트 먼저 실행 — 실패 시 이후 단계 전체 중단
+      - name: Run tests
         run: ./gradlew test
 
-      # ✅ 테스트 실패 시 리포트 업로드 — 실패 원인 파악용
+      # 테스트 실패 시 리포트 업로드
       - name: Upload test report on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -58,16 +56,26 @@ jobs:
           path: build/reports/tests/test/
           retention-days: 3
 
-      # 테스트 통과 후 빌드 실행 (-x test로 테스트 중복 실행 방지)
-      - name: Build with Gradle (skip test)
-        run: ./gradlew build -x test
+      # 2단계: 테스트 통과 후 JAR 빌드
+      # bootJar는 test task를 포함하지 않으므로 -x test 옵션 불필요
+      - name: Build JAR
+        run: ./gradlew bootJar
 
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
         with:
-          name: app-jar
-          path: build/libs/*.jar
-          retention-days: 1
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ steps.set-tag.outputs.tag }}
+            ${{ env.IMAGE_NAME }}:latest
 
   # ==================== CD Step ====================
   deploy-to-ec2:
@@ -76,35 +84,6 @@ jobs:
     env:
       IMAGE_TAG: ${{ needs.build-and-test.outputs.image_tag }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Download build artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: app-jar
-          path: build/libs/
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-          audience: sts.amazonaws.com
-
-      - name: Log in to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build, tag, and push image to Amazon ECR
-        env:
-          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-        run: |
-          FULL_IMAGE="$ECR_REGISTRY/$ECR_REPOSITORY"
-          docker build -t "$FULL_IMAGE:$IMAGE_TAG" -t "$FULL_IMAGE:latest" .
-          docker push "$FULL_IMAGE:$IMAGE_TAG"
-          docker push "$FULL_IMAGE:latest"
-
       - name: SSH Remote Commands (Deploy to EC2)
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -112,14 +91,11 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
-          envs: AWS_REGION,ECR_REPOSITORY,IMAGE_TAG
+          envs: IMAGE_TAG
           script: |
-            REGISTRY="${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.$AWS_REGION.amazonaws.com"
+            IMAGE_URI="${{ secrets.DOCKERHUB_USERNAME }}/${{ github.event.repository.name }}"
 
-            aws ecr get-login-password --region "$AWS_REGION" \
-              | docker login --username AWS --password-stdin "$REGISTRY"
-
-            docker pull "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
+            docker pull "$IMAGE_URI:$IMAGE_TAG"
 
             docker stop app-server || true
             docker rm app-server || true
@@ -128,20 +104,6 @@ jobs:
               --name app-server \
               --restart unless-stopped \
               -p 80:8080 \
-              "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
-
-            echo "Health check 시작..."
-            for i in $(seq 1 12); do
-              sleep 5
-              STATUS=$(curl -sf http://localhost/actuator/health | grep -o '"status":"UP"' || true)
-              if [ -n "$STATUS" ]; then
-                echo "Health check 통과 (${i}번째 시도)"
-                break
-              fi
-              if [ "$i" -eq 12 ]; then
-                echo "Health check 실패 — 배포 실패 처리"
-                exit 1
-              fi
-            done
+              "$IMAGE_URI:$IMAGE_TAG"
 
             docker image prune -f
