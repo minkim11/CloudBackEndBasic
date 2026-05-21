@@ -87,7 +87,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       IMAGE_TAG: ${{ needs.build-and-test.outputs.image_tag }}
-      IMAGE_NAME: ${{ needs.build-and-test.outputs.image_name }}  # 소문자 보장된 값 수신
     steps:
       - name: SSH Remote Commands (Deploy to EC2)
         uses: appleboy/ssh-action@v1.0.3
@@ -96,17 +95,26 @@ jobs:
           username: ${{ secrets.EC2_USERNAME }}
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
-          envs: IMAGE_TAG,IMAGE_NAME
+          envs: IMAGE_TAG
           script: |
+            export PATH=$PATH:/usr/bin:/usr/local/bin
+
+            # CD에서 직접 소문자 변환 — outputs 전달 의존 제거
+            REPO=$(echo "${{ github.event.repository.name }}" | tr '[:upper:]' '[:lower:]')
+            IMAGE_NAME="${{ secrets.DOCKERHUB_USERNAME }}/${REPO}"
+
+            echo "IMAGE_NAME: $IMAGE_NAME"   # 디버그용, 확인 후 삭제 가능
+            echo "IMAGE_TAG: $IMAGE_TAG"
+
             docker pull "$IMAGE_NAME:$IMAGE_TAG"
-            
+
             docker stop app-server || true
             docker rm app-server || true
-            
+
             docker run -d \
               --name app-server \
               --restart unless-stopped \
               -p 80:8080 \
               "$IMAGE_NAME:$IMAGE_TAG"
-            
+
             docker image prune -f
