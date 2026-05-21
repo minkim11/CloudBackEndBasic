@@ -15,3 +15,10 @@ Public IP : 54.180.202.27
 <img src="img/LV3.png" alt="">  
 
 PresignedURL: 
+
+### LV 4 - Docker & CI/CD 파이프라인 구축
+Github Actions 성공이미지  
+<img src="img/LV4-1.png" alt="">
+
+EC2 Docker 터미널  
+<img src="img/LV4-2.png" alt="">
