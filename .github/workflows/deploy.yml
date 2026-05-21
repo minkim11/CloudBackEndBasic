@@ -13,7 +13,7 @@ env:
 jobs:
   # ==================== CI Step ====================
   build-and-test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     outputs:
       image_tag: ${{ steps.set-tag.outputs.tag }}
       image_name: ${{ steps.set-image.outputs.name }}   # CD로 전달
@@ -84,7 +84,7 @@ jobs:
   # ==================== CD Step ====================
   deploy-to-ec2:
     needs: build-and-test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04-arm
     env:
       IMAGE_TAG: ${{ needs.build-and-test.outputs.image_tag }}
     steps:
